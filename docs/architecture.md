@@ -1,66 +1,114 @@
-# MGM FX Pipeline — AWS Architecture
+# MGM FX Pipeline + Spursh Approval System — AWS Architecture
 
-## Pipeline Flow
+## Stack 1: MgmFxPipelineStack (existing)
 
 ```
-AR FX batch (S3) ──► S3 notification ──► BatchTrigger Lambda ──► Step Functions
-                                                                    │
-Intercompany FX ──► Kinesis ──► StreamIngestor Lambda ──► Bronze    │
-                                                                    │
-                    ┌───────────────────────────────────────────────┘
-                    ▼
-              Glue: Silver Cleanse (24-col schema, dedup, quarantine)
-                    │
-                    ▼
-              Glue: Gold Shape (MEC-ready facts, full 24-col preserved)
-                    │
-                    ▼
-              Lambda: MEC Validator
-                ├── Check 1: 24-column completeness
-                ├── Check 2: Dr = Cr per journal (zero tolerance)
-                └── Check 3: 7-segment COA validity
-                    │
-                    ├── FAIL ──► Quarantine + alert
-                    │
-                    └── PASS ──► Lambda: OFA Booking ──► Audit log
+AR FX batch (S3) ──► BatchTrigger Lambda ──► Step Functions
+                                                │
+Intercompany FX ──► Kinesis ──► StreamIngestor  │
+                                                ▼
+                    Glue: Silver Cleanse (24-col, dedup, quarantine)
+                                                │
+                    Glue: Gold Shape (MEC-ready) │
+                                                ▼
+                    MEC Validator ──► OFA Booking ──► Audit Log
 ```
 
-## AWS Services
+## Stack 2: SpurshApprovalStack (new)
 
-| Layer | Service | Purpose |
-|-------|---------|---------|
-| Ingestion (batch) | S3 + Lambda (BatchTrigger) | Detect AR FX file drops, start Step Functions |
-| Ingestion (stream) | Kinesis + Lambda (StreamIngestor) | Consume Intercompany FX events, land in Bronze |
-| Cleansing | Glue ETL (Silver Cleanse) | 24-col normalisation, surrogate key, dedup, quarantine |
-| Data Lake | S3 (Bronze / Silver / Gold / Quarantine) | Medallion architecture |
-| MEC Validation | Lambda (MEC Validator) | 24-col check, Dr=Cr balance, 7-segment COA |
-| OFA Booking | Lambda (OFA Booking) | Idempotent posting to Oracle Financials + audit log |
-| Orchestration | Step Functions | AR FX batch pipeline: Cleanse → Gold → MEC → OFA |
-| Idempotency | DynamoDB | Surrogate key dedup for stream path |
-| Audit | DynamoDB (BookingAuditTable) | Booking run history, OFA journal refs |
-| Reference Data | S3 (RefDataBucket) | COA segment validation reference tables |
+```
+Trigger (monthly/quarterly/yearly)
+    │
+    ▼
+┌─────────────────────────────────────────────────────┐
+│  Step Functions — Spursh Pipeline                    │
+│                                                      │
+│  1. JE Generator Lambda                              │
+│     └─ Creates JEs from AP, AR, IC ledgers           │
+│     └─ All geos: US, EMEA, APAC, LATAM, etc.        │
+│                                                      │
+│  2. Trial Balance Validator Lambda                   │
+│     └─ Dr=Cr per geo per ledger source               │
+│     └─ Account existence in TB                       │
+│     └─ Geo completeness                              │
+│     └─ FAIL → quarantine + stop                      │
+│                                                      │
+│  3. MEC Validator Lambda                             │
+│     └─ 24-column completeness                        │
+│     └─ Dr=Cr per journal (zero tolerance)            │
+│     └─ 7-segment COA validity                        │
+│     └─ FAIL → quarantine + stop                      │
+│                                                      │
+│  4. Spursh Approval (WAIT_FOR_TASK_TOKEN)            │
+│     └─ Validates primary ledger JEs                  │
+│     └─ SNS → L7 manager email                        │
+│     └─ Manager clicks APPROVE/REJECT via API GW      │
+│     └─ REJECT → stop pipeline                        │
+│                                                      │
+│  5. FX Period Booking Lambda                         │
+│     └─ MONTHLY: book as-is                           │
+│     └─ QUARTERLY: net 3 months, book aggregated      │
+│     └─ YEARLY: net 12 months + year-end entries      │
+│     └─ Idempotent (audit table check)                │
+│     └─ Posts to OFA, writes audit log                │
+└─────────────────────────────────────────────────────┘
+```
 
-## Idempotency Strategy
 
-- Surrogate key = `MD5(source_system || journal_id || journal_line_num || effective_date || entered_dr)`
-- Payload hash = `SHA-256(cols 3-22)` for change detection
-- Stream path: DynamoDB rejects duplicate `(surrogate_key, stage)` before S3 write
-- Batch path: Glue deduplicates on surrogate_key before Silver write
-- OFA path: Audit table prevents double-booking of the same batch_id
+## Spursh Approval Flow (L7 Manager)
 
-## MEC Validation Gate (3 checks, all must pass)
+```
+Spursh Approval Lambda
+    │
+    ├── Validates primary ledger (ledger_id ends with -PRIMARY)
+    ├── Checks 24-col, no duplicate surrogate keys, payload_hash
+    ├── Persists approval request to DynamoDB
+    ├── Publishes SNS notification to L7 manager
+    │
+    └── Step Functions PAUSES (WAIT_FOR_TASK_TOKEN)
+            │
+            ▼
+        L7 Manager receives email with APPROVE / REJECT links
+            │
+            ├── APPROVE → API Gateway → Callback Lambda
+            │       └── SendTaskSuccess → pipeline resumes → Book to OFA
+            │
+            └── REJECT → API Gateway → Callback Lambda
+                    └── SendTaskFailure → pipeline stops
+```
 
-1. **24-column completeness** — all columns present, non-nullable fields populated
-2. **Dr = Cr balance** — `sum(accounted_dr) == sum(accounted_cr)` per journal_id, zero tolerance
-3. **7-segment COA validity** — each segment value validated against reference data
+## AWS Services (Spursh Stack)
 
-Failed batches are quarantined to S3 and never reach OFA.
+| Service | Purpose |
+|---------|---------|
+| Lambda (JE Generator) | Create JEs from AP/AR/IC for all geos |
+| Lambda (TB Validator) | Validate JEs against trial balance |
+| Lambda (MEC Validator) | 24-col, Dr=Cr, 7-segment checks |
+| Lambda (Spursh Approval) | Primary ledger validation + SNS notification |
+| Lambda (Spursh Callback) | API GW handler for approve/reject |
+| Lambda (FX Period Booking) | Monthly/quarterly/yearly OFA booking |
+| Step Functions | Orchestration with human approval gate |
+| API Gateway | L7 manager approval endpoint |
+| SNS | Approval notification delivery |
+| DynamoDB (JeTable) | JE storage and audit |
+| DynamoDB (ApprovalTable) | Approval request tracking |
+| DynamoDB (BookingAuditTable) | Booking audit trail |
+| S3 (Gold) | JE batches and booked entries |
+| S3 (Quarantine) | Failed validations |
+| S3 (RefData) | Trial balance and COA reference data |
 
-## Data Lake Tiers
+## Multi-Period FX Booking
 
-| Tier | Bucket | Contents |
-|------|--------|----------|
-| Bronze | BronzeBucket | Raw immutable copies of source files and stream events |
-| Silver | SilverBucket | Cleansed, typed, deduplicated 24-column canonical schema |
-| Gold | GoldBucket | MEC-ready facts partitioned by batch_id |
-| Quarantine | QuarantineBucket | Failed rows and rejected MEC batches |
+| Period | Aggregation | Frequency |
+|--------|-------------|-----------|
+| MONTHLY | Pass-through — book individual JEs | Every month-end |
+| QUARTERLY | Net by journal_id + geo + account | Every quarter-end |
+| YEARLY | Net by geo + account, collapse all journals | Year-end |
+
+## Supported Geos
+
+US, EMEA, APAC, LATAM, CANADA, JAPAN, INDIA, UK
+
+## Ledger Sources
+
+AP (Accounts Payable), AR (Accounts Receivable), IC (Intercompany)
