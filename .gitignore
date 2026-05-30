@@ -6,4 +6,5 @@ cdk.out/
 *.pyo
 *.pyd
 node_modules/
-
+local-dev-agent/.env
+local-dev-agent/**/*.log

@@ -1,0 +1,53 @@
+{
+  "name": "local-dev-agent",
+  "displayName": "Local Dev Agent",
+  "description": "Air-gapped local coding agent for VS Code using an OpenAI-compatible local LLM.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "scripts": {
+    "check": "node --check src/extension.js"
+  },
+  "engines": {
+    "vscode": "^1.88.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:localDevAgent.openChat",
+    "onCommand:localDevAgent.askActiveFile"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "localDevAgent.openChat",
+        "title": "Local Dev Agent: Open Chat"
+      },
+      {
+        "command": "localDevAgent.askActiveFile",
+        "title": "Local Dev Agent: Ask About Active File"
+      }
+    ],
+    "configuration": {
+      "title": "Local Dev Agent",
+      "properties": {
+        "localDevAgent.serverUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8765",
+          "description": "Local Dev Agent backend URL."
+        },
+        "localDevAgent.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Python executable used to start the backend."
+        },
+        "localDevAgent.autoStartServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start the backend when opening chat."
+        }
+      }
+    }
+  }
+}
