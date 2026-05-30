@@ -102,3 +102,24 @@ cdk deploy
 - Register Glue crawlers or explicit tables for Silver and Gold datasets
 - Add CI/CD and environment-specific CDK stages
 - Add unit tests plus contract tests around canonical schema validation
+
+## Urban Anomaly Intelligence Pipeline
+
+This repository also includes a separate responsible sensor-fusion starter for
+authorized public-safety anomaly triage across capital cities:
+
+- `urban_anomaly_pipeline/urban_anomaly_stack.py` provisions Kinesis, Lambda,
+  S3, DynamoDB, API Gateway, a Glue database, and static dashboard assets.
+- `lambdas/urban_event_ingestor/` validates and minimizes incoming sensor
+  events, requiring authorization metadata before Bronze landing.
+- `lambdas/urban_anomaly_scorer/` creates explainable anomaly alerts with
+  reason codes and a human-review status.
+- `lambdas/urban_dashboard_api/` exposes read-only alert data for dashboards.
+- `dashboard/urban-anomaly/` is a static dashboard that works with sample data
+  locally or a deployed API via `?api=<api-url>`.
+- `docs/urban_anomaly_srs.md` contains the SRS.
+- `docs/urban_anomaly_architecture.md` contains the architecture notes.
+
+The implementation is intentionally scoped for synthetic demos and authorized
+operations. It does not automate enforcement decisions or provide tools for
+unauthorized surveillance, interception, or targeting.

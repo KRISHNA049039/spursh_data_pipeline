@@ -3,6 +3,7 @@ import aws_cdk as cdk
 
 from fx_pipeline.fx_pipeline_stack import FxPipelineStack
 from spursh.spursh_stack import SpurshStack
+from urban_anomaly_pipeline.urban_anomaly_stack import UrbanAnomalyStack
 
 
 app = cdk.App()
@@ -19,5 +20,13 @@ SpurshStack(
     description="Spursh JE validation & L7 approval system — AP/AR/IC multi-period FX booking",
 )
 
-app.synth()
+UrbanAnomalyStack(
+    app,
+    "UrbanAnomalyIntelligenceStack",
+    description=(
+        "Responsible authorized sensor-fusion pipeline and dashboard "
+        "for human-reviewed urban anomaly alerts"
+    ),
+)
 
+app.synth()

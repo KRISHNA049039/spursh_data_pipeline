@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Urban Anomaly Dashboard</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <section class="toolbar" aria-label="Dashboard controls">
+      <div>
+        <p class="eyebrow">Authorized Operations</p>
+        <h1>Urban Anomaly Dashboard</h1>
+      </div>
+      <div class="controls">
+        <label>
+          City
+          <select id="city">
+            <option>New Delhi</option>
+            <option>Washington DC</option>
+            <option>London</option>
+            <option>Tokyo</option>
+          </select>
+        </label>
+        <button id="refresh">Refresh</button>
+      </div>
+    </section>
+
+    <section class="stats" aria-label="Alert summary">
+      <article><span id="total">0</span><p>Total</p></article>
+      <article><span id="critical">0</span><p>Critical</p></article>
+      <article><span id="high">0</span><p>High</p></article>
+      <article><span id="medium">0</span><p>Medium</p></article>
+    </section>
+
+    <section class="workspace">
+      <div class="map-panel">
+        <div id="map" aria-label="Schematic alert map"></div>
+      </div>
+      <div class="review-panel">
+        <div class="panel-head">
+          <h2>Human Review Queue</h2>
+          <span id="city-label">New Delhi</span>
+        </div>
+        <div id="alerts" class="alerts"></div>
+      </div>
+    </section>
+  </main>
+  <script src="./sample-alerts.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
